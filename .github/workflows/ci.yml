@@ -1,0 +1,103 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.0'
+
+      - name: Cache NuGet
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Install dependencies
+        run: dotnet restore src/BooksApi.sln
+
+      - name: Build
+        run: dotnet build src/BooksApi.sln --configuration Release --no-restore
+
+      - name: Unit tests with coverage
+        run: dotnet test src/Tests/BooksApi.UnitTests/BooksApi.UnitTests.csproj --collect:"XPlat Code Coverage" --results-directory ./TestResults
+
+      - name: Publish API
+        run: dotnet publish src/BooksApi.sln -c Release -o publish/
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-build
+          path: publish/
+
+      # - name: SonarCloud Scan
+      #   uses: SonarSource/sonarcloud-github-action@v2
+      #   with:
+      #     args: >
+      #       -Dsonar.projectKey=your_key
+      #       -Dsonar.organization=your_org
+
+      # - name: Run Trivy scan
+      #   uses: aquasecurity/trivy-action@master
+      #   with:
+      #     scan-type: fs
+      #     path: .
+
+  sonar-scan:
+    needs: build-test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.0'
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: api-build
+          path: publish/
+
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarcloud-github-action@v2
+        with:
+          args: >
+            -Dsonar.projectKey=your_key
+            -Dsonar.organization=your_org
+            -Dsonar.cs.vstest.reportsPaths=TestResults/*.trx
+            -Dsonar.cs.opencover.reportsPaths=**/coverage.opencover.xml
+
+  trivy-scan:
+    needs: build-test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: api-build
+          path: publish/
+
+      - name: Run Trivy scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: fs
+          path: publish/
