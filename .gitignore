@@ -1,0 +1,67 @@
+# dependencies (bun install)
+node_modules
+
+# output
+out
+dist
+*.tgz
+
+# code coverage
+coverage
+*.lcov
+
+# logs
+logs
+*.log
+report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
+
+# dotenv environment variable files
+.env
+.env.development.local
+.env.test.local
+.env.production.local
+.env.local
+
+# caches
+.eslintcache
+.cache
+*.tsbuildinfo
+
+# IntelliJ based IDEs
+.idea
+
+# Finder (MacOS) folder config
+.DS_Store
+
+# ------------------------------------------------
+# .NET and Visual Studio related files to ignore
+# ------------------------------------------------
+
+# Build results
+[Bb]in/
+[Oo]bj/
+[Tt]emp/
+[Dd]ebug/
+[Rr]elease/
+
+# VS temporary files
+*.opendb
+*.user
+*.suo
+*.sln.iml
+
+# NuGet packages
+*.nupkg
+*.snupkg
+**/[Pp]ackages/
+# NuGet v3's project.json files produces more ignorable files
+*.nuget.props
+*.nuget.targets
+
+# Visual Studio Code
+.vscode/
+
+# ReSharper and other tools
+_ReSharper.*/
+*.resharper
+[Tt]humbs.db # Windows thumbnail cache

@@ -1,0 +1,22 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BooksApi.App", "app\BooksApi.App\BooksApi.App.csproj", "{E4C3A86F-DB9A-4E38-87F4-4EE076311642}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BooksApi.UnitTests", "tests\BooksApi.UnitTests\BooksApi.UnitTests.csproj", "{E53902BA-2D39-4A0B-A506-3B27E0BD3245}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{E4C3A86F-DB9A-4E38-87F4-4EE076311642}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E4C3A86F-DB9A-4E38-87F4-4EE076311642}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E4C3A86F-DB9A-4E38-87F4-4EE076311642}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E4C3A86F-DB9A-4E38-87F4-4EE076311642}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E53902BA-2D39-4A0B-A506-3B27E0BD3245}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E53902BA-2D39-4A0B-A506-3B27E0BD3245}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E53902BA-2D39-4A0B-A506-3B27E0BD3245}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E53902BA-2D39-4A0B-A506-3B27E0BD3245}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal
