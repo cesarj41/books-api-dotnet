@@ -1,5 +1,9 @@
 name: CI
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   pull_request:
     branches: [ "main" ]
@@ -28,9 +32,6 @@ jobs:
       - name: Install dependencies
         run: dotnet restore src/BooksApi.sln
 
-      - name: Build
-        run: dotnet build src/BooksApi.sln --configuration Release --no-restore
-
       - name: Unit tests with coverage
         run: dotnet test src/Tests/BooksApi.UnitTests/BooksApi.UnitTests.csproj --collect:"XPlat Code Coverage" --results-directory ./TestResults
 
@@ -40,25 +41,15 @@ jobs:
           name: test-results
           path: TestResults/
 
-      - name: Publish API
-        run: dotnet publish src/BooksApi.sln -c Release -o publish/
-
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+      - name: Report test results to PR
+        uses: dorny/test-reporter@v1
         with:
-          name: api-build
-          path: publish/
+          name: Unit Tests
+          path: TestResults/*.trx
+          reporter: dotnet-trx
 
-      - name: Build Docker image
-        run: docker build -t books-api:ci .
-
-      - name: Save Docker image
-        run: docker save books-api:ci | gzip > books-api-ci-image.tar.gz
-      - name: Upload Docker image artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: books-api-ci-image
-          path: books-api-ci-image.tar.gz
+      - name: Build API image
+        run: docker build -t books-api-api:pr-${{ github.event.number }} -f Dockerfile .
 
   sonar-scan:
     needs: build-test
@@ -72,11 +63,14 @@ jobs:
         with:
           dotnet-version: '10.0.0'
 
-      - name: Download build artifacts
-        uses: actions/download-artifact@v4
+      - name: Download test results
+        uses: actions/download-artifact@v3
         with:
-          name: api-build
-          path: publish/
+          name: test-results
+          path: TestResults/
+
+      - name: Ensure coverage files exist
+        run: ls -R TestResults
 
       - name: SonarCloud Scan
         uses: SonarSource/sonarcloud-github-action@v2
@@ -85,7 +79,7 @@ jobs:
             -Dsonar.projectKey=your_key
             -Dsonar.organization=your_org
             -Dsonar.cs.vstest.reportsPaths=TestResults/*.trx
-            -Dsonar.cs.opencover.reportsPaths=**/coverage.opencover.xml
+            -Dsonar.cs.cobertura.reportsPaths=**/coverage.cobertura.xml
             -Dsonar.qualitygate.wait=true
 
   trivy-scan:
@@ -95,15 +89,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download Docker image artifact
-        uses: actions/download-artifact@v4
+      - name: Cache Trivy DB
+        uses: actions/cache@v4
         with:
-          name: books-api-ci-image
+          path: ~/.cache/trivy
+          key: trivy-db-${{ runner.os }}-${{ hashFiles('.github/workflows/**') }}
+          restore-keys: trivy-db-${{ runner.os }}-
 
-      - name: Load Docker image
-        run: gzip -dc books-api-ci-image.tar.gz | docker load
       - name: Trivy Image Scan
         uses: aquasecurity/trivy-action@master
         with:
           scan-type: image
-          image-ref: books-api:ci
+          image-ref: books-api-api:pr-${{ github.event.number }}

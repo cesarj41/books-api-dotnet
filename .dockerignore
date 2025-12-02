@@ -1,0 +1,62 @@
+# ============================
+# Build Artifacts / Output
+# ============================
+bin/
+obj/
+out/
+publish/
+
+# Dotnet user secrets & local dev config
+**/*.user
+**/*.csproj.user
+secrets.json
+
+# ============================
+# Logs & Temp Files
+# ============================
+*.log
+logs/
+*.tmp
+tmp/
+temp/
+
+# Fluent Bit buffers (handled by Docker volume)
+log-collector/storage/
+log-collector/buffer/
+fluentbit_buffer/
+
+# ============================
+# Ignore Git files
+# ============================
+.git/
+.gitignore
+
+# ============================
+# Ignore OS/editor files
+# ============================
+.DS_Store
+*.swp
+*.swo
+*.bak
+Thumbs.db
+
+# VS Code settings (optional)
+.vscode/
+
+# Rider / JetBrains (optional)
+.idea/
+
+# ============================
+# Node / Frontend (if present)
+# ============================
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# ============================
+# Build cache & tooling
+# ============================
+*.tgz
+*.zip
+*.tar
+*.gz

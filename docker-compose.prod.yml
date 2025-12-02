@@ -1,0 +1,53 @@
+# prod
+services:
+  api:
+    image: ghcr.io/your-org/books-api:${TAG}
+    restart: always
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__Default: "${DB_CONNECTION_STRING:-Data Source=/app/db/app.db}"
+    volumes:
+      - data_prod:/app/db
+    ports:
+      - "${API_PORT:-8080}:8080"
+    logging:
+      driver: fluentd
+      options:
+        fluentd-address: "fluentbit:${FLUENTD_PORT:-24224}"
+        tag: "${FLUENTD_TAG:-books-api.prod}"
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: "512M"
+
+  fluentbit:
+    image: amazon/aws-for-fluent-bit:latest
+    restart: always
+    ports:
+      - "${FLUENTD_PORT:-24224}:24224"
+    volumes:
+      - ./log-collector/fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf
+      - ./log-collector/parsers.conf:/fluent-bit/etc/parsers.conf
+      - fluentbit_buffer:/fluent-bit/buffer
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:2020/api/v1/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: "256M"
+
+volumes:
+  data_prod:
+  fluentbit_buffer:
