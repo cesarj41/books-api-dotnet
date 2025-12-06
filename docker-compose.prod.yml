@@ -1,8 +1,11 @@
 # prod
 services:
   api:
-    image: ghcr.io/your-org/books-api:${TAG}
+    image: ghcr.io/${GITHUB_REPOSITORY_OWNER:-your-org}/books-api:${TAG:-latest}
     restart: always
+    depends_on:
+      fluentbit:
+        condition: service_started
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       ConnectionStrings__Default: "${DB_CONNECTION_STRING:-Data Source=/app/db/app.db}"
@@ -17,11 +20,15 @@ services:
         tag: "${FLUENTD_TAG:-books-api.prod}"
         max-size: "10m"
         max-file: "3"
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
+    # Healthcheck disabled - distroless images don't have curl/wget/nc
+    # Use external monitoring tools to check /health endpoint
+    # Or use a sidecar container (e.g., curlimages/curl) for health checks
+    # healthcheck:
+    #   test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+    #   interval: 30s
+    #   timeout: 10s
+    #   retries: 3
+    #   start_period: 20s
     deploy:
       resources:
         limits:
@@ -37,6 +44,23 @@ services:
       - ./log-collector/fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf
       - ./log-collector/parsers.conf:/fluent-bit/etc/parsers.conf
       - fluentbit_buffer:/fluent-bit/buffer
+    environment:
+      # AWS Credentials - Use IAM role in production (ECS/EKS), env vars for local
+      # In production, remove AWS_ACCESS_KEY_ID/SECRET and use IAM role instead
+      - AWS_REGION=${AWS_REGION:-us-east-1}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN:-}
+      # CloudWatch Configuration
+      - CLOUDWATCH_LOG_GROUP=${CLOUDWATCH_LOG_GROUP:-books-api}
+      - CLOUDWATCH_LOG_STREAM=${CLOUDWATCH_LOG_STREAM:-books-api-${HOSTNAME}}
+      - CLOUDWATCH_LOG_RETENTION_DAYS=${CLOUDWATCH_LOG_RETENTION_DAYS:-30}
+      - CLOUDWATCH_AUTO_CREATE_GROUP=${CLOUDWATCH_AUTO_CREATE_GROUP:-true}
+      - CLOUDWATCH_AUTO_CREATE_STREAM=${CLOUDWATCH_AUTO_CREATE_STREAM:-true}
+      # Environment tag
+      - ENVIRONMENT=${ENVIRONMENT:-production}
+      # Hostname for log stream naming
+      - HOSTNAME=${HOSTNAME:-$(hostname)}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:2020/api/v1/health"]
       interval: 10s

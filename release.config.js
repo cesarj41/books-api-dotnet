@@ -1,5 +1,5 @@
 export default {
-  branches: ["master"],
+  branches: ["main"],
   repositoryUrl: "https://github.com/cesarj41/books-api-dotnet.git",
   plugins: [
     "@semantic-release/commit-analyzer",

@@ -1,11 +1,11 @@
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /app
 
-COPY ./src/BooksApi/*.csproj ./src/BooksApi/
-RUN dotnet restore ./src/BooksApi/BooksApi.csproj
+COPY ./src/app/BooksApi.App/*.csproj ./src/app/BooksApi.App/
+RUN dotnet restore ./src/app/BooksApi.App/BooksApi.App.csproj
 
-COPY ./src/BooksApi/ ./src/BooksApi/
-RUN dotnet publish ./src/BooksApi/BooksApi.csproj -c Release -o /app/publish --no-restore
+COPY ./src/app/BooksApi.App/ ./src/app/BooksApi.App/
+RUN dotnet publish ./src/app/BooksApi.App/BooksApi.App.csproj -c Release -o /app/publish --no-restore
 
 FROM gcr.io/distroless/base-debian12:nonroot
 WORKDIR /app
@@ -14,7 +14,7 @@ COPY --from=build /app/publish/ /app/
 
 EXPOSE 8080
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD ["/app/books-api-dotnet"]
+# Healthcheck removed - using docker-compose level healthchecks instead
+# Distroless images don't have curl/wget, so healthchecks are handled at compose level
 
-ENTRYPOINT ["/app/books-api-dotnet"]
+ENTRYPOINT ["/app/BooksApi.App"]

@@ -33,7 +33,7 @@ jobs:
         run: dotnet restore src/BooksApi.sln
 
       - name: Unit tests with coverage
-        run: dotnet test src/Tests/BooksApi.UnitTests/BooksApi.UnitTests.csproj --collect:"XPlat Code Coverage" --results-directory ./TestResults
+        run: dotnet test src/tests/BooksApi.UnitTests/BooksApi.UnitTests.csproj --collect:"XPlat Code Coverage" --results-directory ./TestResults -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura
 
       - name: Upload test results for PR annotations
         uses: actions/upload-artifact@v4
@@ -74,30 +74,13 @@ jobs:
 
       - name: SonarCloud Scan
         uses: SonarSource/sonarcloud-github-action@v2
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         with:
           args: >
-            -Dsonar.projectKey=your_key
-            -Dsonar.organization=your_org
+            -Dsonar.projectKey=${{ secrets.SONAR_PROJECT_KEY }}
+            -Dsonar.organization=${{ secrets.SONAR_ORGANIZATION }}
             -Dsonar.cs.vstest.reportsPaths=TestResults/*.trx
             -Dsonar.cs.cobertura.reportsPaths=**/coverage.cobertura.xml
             -Dsonar.qualitygate.wait=true
-
-  trivy-scan:
-    needs: build-test
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Cache Trivy DB
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/trivy
-          key: trivy-db-${{ runner.os }}-${{ hashFiles('.github/workflows/**') }}
-          restore-keys: trivy-db-${{ runner.os }}-
-
-      - name: Trivy Image Scan
-        uses: aquasecurity/trivy-action@master
-        with:
-          scan-type: image
-          image-ref: books-api-api:pr-${{ github.event.number }}
+            -Dsonar.coverage.exclusions=**/Program.cs,**/Migrations/**,**/obj/**,**/bin/**

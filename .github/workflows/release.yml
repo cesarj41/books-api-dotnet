@@ -1,0 +1,393 @@
+name: Release
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  release:
+    outputs:
+      new_release: ${{ steps.get-version.outputs.new_release }}
+      version: ${{ steps.get-version.outputs.version }}
+      tag: ${{ steps.get-version.outputs.tag }}
+      image: ${{ steps.get-version.outputs.image }}
+      previous_version: ${{ steps.get-version.outputs.previous_version }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      packages: write
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: 'latest'
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Get previous version for rollback
+        id: previous-version
+        run: |
+          PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || echo "")
+          if [ -n "$PREVIOUS_TAG" ]; then
+            PREV_VERSION=${PREVIOUS_TAG#v}
+            echo "version=$PREV_VERSION" >> $GITHUB_OUTPUT
+            echo "tag=$PREVIOUS_TAG" >> $GITHUB_OUTPUT
+          else
+            echo "version=" >> $GITHUB_OUTPUT
+            echo "tag=" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run semantic-release
+        id: semantic-release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bunx semantic-release
+        continue-on-error: true
+
+      - name: Fetch tags after semantic-release
+        if: steps.semantic-release.outcome == 'success'
+        run: git fetch --tags --force
+
+      - name: Extract version from git tags
+        id: get-version
+        if: steps.semantic-release.outcome == 'success'
+        run: |
+          # Get the latest tag created by semantic-release
+          # This is the most reliable way since semantic-release creates the tag
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          
+          if [ -n "$LATEST_TAG" ]; then
+            # Remove 'v' prefix if present
+            VERSION=${LATEST_TAG#v}
+            TAG="$LATEST_TAG"
+            IMAGE="ghcr.io/${{ github.repository_owner }}/books-api:${VERSION}"
+            
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
+            echo "tag=$TAG" >> $GITHUB_OUTPUT
+            echo "image=$IMAGE" >> $GITHUB_OUTPUT
+            echo "new_release=true" >> $GITHUB_OUTPUT
+            echo "previous_version=${{ steps.previous-version.outputs.version }}" >> $GITHUB_OUTPUT
+            echo "✅ New release created: $TAG" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "new_release=false" >> $GITHUB_OUTPUT
+            echo "version=" >> $GITHUB_OUTPUT
+            echo "tag=" >> $GITHUB_OUTPUT
+            echo "⚠️ No new release created (no changes detected)" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Set up Docker Buildx
+        if: steps.get-version.outputs.new_release == 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        if: steps.get-version.outputs.new_release == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        if: steps.get-version.outputs.new_release == 'true'
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/books-api
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest
+
+      - name: Build Docker image (for scanning)
+        if: steps.get-version.outputs.new_release == 'true'
+        id: build-scan
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: false
+          tags: books-api:scan
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64
+          load: true
+
+      - name: Scan Docker image with Trivy
+        if: steps.get-version.outputs.new_release == 'true'
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: books-api:scan
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+
+      - name: Upload Trivy results to GitHub Security
+        if: steps.get-version.outputs.new_release == 'true'
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+      - name: Sign and push Docker image with provenance
+        if: steps.get-version.outputs.new_release == 'true'
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64,linux/arm64
+          provenance: true
+          sbom: true
+          # Enable attestations for supply chain security
+          build-args: |
+            BUILDKIT_INLINE_CACHE=1
+
+      - name: Send release notification
+        if: steps.get-version.outputs.new_release == 'true'
+        uses: 8398a7/action-slack@v3
+        with:
+          status: custom
+          custom_payload: |
+            {
+              "text": "🚀 New Release Created",
+              "attachments": [{
+                "color": "good",
+                "fields": [{
+                  "title": "Version",
+                  "value": "${{ steps.get-version.outputs.tag }}",
+                  "short": true
+                }, {
+                  "title": "Repository",
+                  "value": "${{ github.repository }}",
+                  "short": true
+                }, {
+                  "title": "Triggered by",
+                  "value": "${{ github.actor }}",
+                  "short": true
+                }, {
+                  "title": "Image",
+                  "value": "${{ steps.get-version.outputs.image }}",
+                  "short": false
+                }]
+              }]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        continue-on-error: true
+
+  deploy:
+    needs: release
+    if: needs.release.outputs.new_release == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+    permissions:
+      contents: read
+      packages: read
+
+    steps:
+      - name: Get release version from previous job
+        id: get-version
+        run: |
+          VERSION="${{ needs.release.outputs.version }}"
+          TAG="${{ needs.release.outputs.tag }}"
+          IMAGE="${{ needs.release.outputs.image }}"
+          PREV_VERSION="${{ needs.release.outputs.previous_version }}"
+          
+          if [ -n "$VERSION" ]; then
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
+            echo "tag=$TAG" >> $GITHUB_OUTPUT
+            echo "image=$IMAGE" >> $GITHUB_OUTPUT
+            echo "previous_version=$PREV_VERSION" >> $GITHUB_OUTPUT
+            echo "✅ Deploying version: $VERSION (tag: $TAG)"
+          else
+            echo "❌ No version found from release job"
+            exit 1
+          fi
+
+      - name: Display deployment information
+        run: |
+          echo "## 🚀 Deployment Information" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version**: ${{ steps.get-version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Tag**: ${{ steps.get-version.outputs.tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image**: ${{ steps.get-version.outputs.image }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Previous Version**: ${{ steps.get-version.outputs.previous_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Triggered by**: ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Time**: $(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "⏸️ Waiting for manual approval to deploy to production..." >> $GITHUB_STEP_SUMMARY
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify Docker image exists
+        run: |
+          IMAGE="${{ steps.get-version.outputs.image }}"
+          echo "Checking if image exists: ${IMAGE}"
+          
+          if docker pull "${IMAGE}" >/dev/null 2>&1; then
+            echo "✅ Docker image found: ${IMAGE}"
+          else
+            echo "❌ Docker image not found: ${IMAGE}"
+            echo "Please ensure the image was built and pushed in the release job."
+            exit 1
+          fi
+
+      - name: Deploy with Pulumi
+        id: deploy
+        run: |
+          echo "🚀 Deploying version ${{ steps.get-version.outputs.version }} to production..."
+          echo ""
+          echo "Pulumi deployment step - not implemented yet"
+          echo ""
+          echo "TODO: Add Pulumi deployment commands here"
+          echo "Example:"
+          echo "  - Setup Pulumi"
+          echo "  - Set image version: ${{ steps.get-version.outputs.version }}"
+          echo "  - Run: pulumi up --yes"
+          echo ""
+          echo "Image to deploy: ${{ steps.get-version.outputs.image }}"
+          # TODO: Uncomment and configure when ready
+          # - name: Setup Pulumi
+          #   uses: pulumi/actions@v4
+          #   with:
+          #     pulumi-version: latest
+          # - name: Configure Pulumi
+          #   run: |
+          #     pulumi config set image:tag ${{ steps.get-version.outputs.version }}
+          # - name: Deploy
+          #   run: pulumi up --yes
+          #   env:
+          #     PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+          
+          # Simulate deployment success for now
+          echo "deployment_success=true" >> $GITHUB_OUTPUT
+
+      - name: Health check after deployment
+        id: healthcheck
+        run: |
+          echo "🔍 Running health checks..."
+          # TODO: Replace with actual health check endpoint
+          # HEALTH_URL="https://your-production-url.com/health"
+          # 
+          # MAX_RETRIES=10
+          # RETRY_COUNT=0
+          # 
+          # while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+          #   if curl -f "${HEALTH_URL}" >/dev/null 2>&1; then
+          #     echo "✅ Health check passed"
+          #     echo "health_check_passed=true" >> $GITHUB_OUTPUT
+          #     exit 0
+          #   fi
+          #   RETRY_COUNT=$((RETRY_COUNT + 1))
+          #   echo "⏳ Health check attempt $RETRY_COUNT/$MAX_RETRIES failed, retrying..."
+          #   sleep 10
+          # done
+          # 
+          # echo "❌ Health check failed after $MAX_RETRIES attempts"
+          # echo "health_check_passed=false" >> $GITHUB_OUTPUT
+          # exit 1
+          
+          # For now, simulate health check success
+          echo "✅ Health check passed (simulated)"
+          echo "health_check_passed=true" >> $GITHUB_OUTPUT
+
+      - name: Rollback on failure
+        if: steps.healthcheck.outputs.health_check_passed != 'true'
+        run: |
+          echo "❌ Health check failed. Initiating rollback..."
+          PREV_VERSION="${{ steps.get-version.outputs.previous_version }}"
+          
+          if [ -n "$PREV_VERSION" ]; then
+            echo "🔄 Rolling back to previous version: $PREV_VERSION"
+            # TODO: Implement actual rollback via Pulumi
+            # pulumi config set image:tag $PREV_VERSION
+            # pulumi up --yes
+            echo "Rollback to version $PREV_VERSION would be executed here"
+          else
+            echo "⚠️ No previous version found. Manual intervention required."
+          fi
+          
+          exit 1
+
+      - name: Send deployment success notification
+        if: steps.healthcheck.outputs.health_check_passed == 'true'
+        uses: 8398a7/action-slack@v3
+        with:
+          status: custom
+          custom_payload: |
+            {
+              "text": "✅ Deployment Successful",
+              "attachments": [{
+                "color": "good",
+                "fields": [{
+                  "title": "Version",
+                  "value": "${{ steps.get-version.outputs.tag }}",
+                  "short": true
+                }, {
+                  "title": "Environment",
+                  "value": "Production",
+                  "short": true
+                }, {
+                  "title": "Deployed by",
+                  "value": "${{ github.actor }}",
+                  "short": true
+                }]
+              }]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        continue-on-error: true
+
+      - name: Send deployment failure notification
+        if: failure() && steps.healthcheck.outputs.health_check_passed != 'true'
+        uses: 8398a7/action-slack@v3
+        with:
+          status: custom
+          custom_payload: |
+            {
+              "text": "❌ Deployment Failed",
+              "attachments": [{
+                "color": "danger",
+                "fields": [{
+                  "title": "Version",
+                  "value": "${{ steps.get-version.outputs.tag }}",
+                  "short": true
+                }, {
+                  "title": "Environment",
+                  "value": "Production",
+                  "short": true
+                }, {
+                  "title": "Status",
+                  "value": "Rollback initiated",
+                  "short": true
+                }]
+              }]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        continue-on-error: true

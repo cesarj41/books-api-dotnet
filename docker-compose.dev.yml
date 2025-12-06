@@ -5,6 +5,9 @@ services:
       context: .
       dockerfile: Dockerfile
     image: books-api:dev
+    depends_on:
+      fluentbit:
+        condition: service_started
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ConnectionStrings__Default: "Data Source=/app/db/app.db"
@@ -12,11 +15,15 @@ services:
       - data_dev:/app/db
     ports:
       - "${API_PORT:-8080}:8080"
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
+    # Healthcheck disabled - distroless images don't have curl/wget/nc
+    # Use external monitoring tools to check /health endpoint
+    # Or use a sidecar container (e.g., curlimages/curl) for health checks
+    # healthcheck:
+    #   test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+    #   interval: 30s
+    #   timeout: 10s
+    #   retries: 3
+    #   start_period: 20s
     deploy:
       resources:
         limits:
@@ -32,12 +39,29 @@ services:
 
   fluentbit:
     image: amazon/aws-for-fluent-bit:latest
+    restart: unless-stopped
     ports:
       - "${FLUENTD_PORT:-24224}:24224"
     volumes:
       - ./log-collector/fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf
       - ./log-collector/parsers.conf:/fluent-bit/etc/parsers.conf
       - fluentbit_buffer:/fluent-bit/buffer
+    environment:
+      # AWS Credentials (use IAM role in production, env vars for local dev)
+      - AWS_REGION=${AWS_REGION:-us-east-1}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN:-}
+      # CloudWatch Configuration
+      - CLOUDWATCH_LOG_GROUP=${CLOUDWATCH_LOG_GROUP:-books-api-dev}
+      - CLOUDWATCH_LOG_STREAM=${CLOUDWATCH_LOG_STREAM:-books-api-dev-${HOSTNAME}}
+      - CLOUDWATCH_LOG_RETENTION_DAYS=${CLOUDWATCH_LOG_RETENTION_DAYS:-7}
+      - CLOUDWATCH_AUTO_CREATE_GROUP=${CLOUDWATCH_AUTO_CREATE_GROUP:-true}
+      - CLOUDWATCH_AUTO_CREATE_STREAM=${CLOUDWATCH_AUTO_CREATE_STREAM:-true}
+      # Environment tag
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      # Hostname for log stream naming
+      - HOSTNAME=${HOSTNAME:-$(hostname)}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:2020/api/v1/health"]
       interval: 10s
